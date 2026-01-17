@@ -22,6 +22,21 @@ jobs:
           token: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
           persist-credentials: true
 
+      - name: Ensure origin uses PAT for pushes
+        run: |
+          git remote set-url origin "https://x-access-token:${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}@github.com/${{ github.repository }}.git"
+          git remote -v | sed -E 's/(https:\/\/)[^@]+@/\\1****@/g'
+
+      - name: Git state and PAT permissions
+        env:
+          PAT: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Current branch: $(git branch --show-current || echo '(no branch)')"
+          git ls-remote --heads origin || true
+          curl -s -H "Authorization: token $PAT" https://api.github.com/user | jq '{login: .login}'
+          curl -s -H "Authorization: token $PAT" "https://api.github.com/repos/$REPO" | jq '.permissions'
+
       - name: Extract PR description
         id: extract-desc
         run: |
@@ -110,7 +125,7 @@ jobs:
           git branch --show-current
           git status --porcelain
           echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
-    
+          
       - name: Commit and push changes to auto branch
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
