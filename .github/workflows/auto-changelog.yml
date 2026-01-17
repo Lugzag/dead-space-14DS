@@ -19,6 +19,8 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
+          token: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
+          persist-credentials: true
 
       - name: Prepare changelog branch
         run: |
@@ -134,6 +136,8 @@ jobs:
           branch: auto/changelog
           commit_message: "Обновлён ченжлог (#${{ github.event.pull_request.number }})"
           file_pattern: Resources/Changelog/ChangelogDS14.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
 
       - name: Create PR to master if not exists
         env:
