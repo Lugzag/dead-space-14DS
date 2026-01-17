@@ -1,41 +1,19 @@
 name: Auto changelog
 
 on:
-  pull_request_target:
+  pull_request:
     types: [closed]
-
-permissions:
-  contents: write
-  pull-requests: write
 
 jobs:
   auto-changelog:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout master
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
-          token: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
-          persist-credentials: true
-
-      - name: Prepare changelog branch
-        run: |
-          BRANCH="auto/changelog"
-
-          git fetch origin
-
-          if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
-            echo "Ветка $BRANCH существует"
-            git checkout $BRANCH
-            git pull origin $BRANCH
-          else
-            echo "Создаю ветку $BRANCH"
-            git checkout -b $BRANCH
-          fi
 
       - name: Extract PR description
         id: extract-desc
@@ -102,64 +80,46 @@ jobs:
 
           if os.path.exists(CHANGELOG_FILE):
               with open(CHANGELOG_FILE, 'r', encoding='utf-8') as f:
-                  data = yaml.safe_load(f) or {}
+                  try:
+                      data = yaml.safe_load(f) or {}
+                  except Exception as e:
+                      print(f"Ошибка чтения {CHANGELOG_FILE}: {e}")
+                      data = {}
           else:
               data = {}
 
           entries = data.get('Entries', [])
           max_id = max((entry['id'] for entry in entries), default=0)
+          new_id = max_id + 1
 
-          entries.append({
-              'id': max_id + 1,
+          new_entry = {
+              'id': new_id,
               'author': author,
               'time': datetime.now(timezone.utc).isoformat(),
               'changes': changes
-          })
+          }
 
+          entries.append(new_entry)
           data['Entries'] = entries
 
           with open(CHANGELOG_FILE, 'w', encoding='utf-8') as f:
               yaml.dump(
                   data,
                   f,
+                  default_style=None,
+                  default_flow_style=False,
                   allow_unicode=True,
                   sort_keys=False,
                   indent=2
               )
 
-          print("Changelog обновлён")
+          print(f"Изменения могут быть записаны в {CHANGELOG_FILE}.")
           EOF
 
-      - name: Commit and push to changelog branch
+
+      - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          branch: auto/changelog
-          commit_message: "Обновлён ченжлог (#${{ github.event.pull_request.number }})"
+          commit_message: "Обновлён ченжлог #${{ github.event.pull_request.number }}"
           file_pattern: Resources/Changelog/ChangelogDS14.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
-
-      - name: Create PR to master if not exists
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
-        run: |
-          EXISTING_PR=$(curl -s \
-            -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls?head=${{ github.repository_owner }}:auto/changelog&base=master" \
-            | jq length)
-
-          if [ "$EXISTING_PR" -eq 0 ]; then
-            curl -s -X POST \
-              -H "Authorization: token $GH_TOKEN" \
-              -H "Content-Type: application/json" \
-              https://api.github.com/repos/${{ github.repository }}/pulls \
-              -d '{
-                "title": "Auto: обновление changelog",
-                "head": "auto/changelog",
-                "base": "master",
-                "body": "Автоматически сгенерированный PR с changelog’ом."
-              }'
-            echo "PR создан"
-          else
-            echo "PR уже существует"
-          fi
+          branch: ${{ github.event.pull_request.base.ref }}
