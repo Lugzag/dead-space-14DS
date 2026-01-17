@@ -1,8 +1,11 @@
 name: Auto changelog
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   auto-changelog:
@@ -19,10 +22,15 @@ jobs:
         id: extract-desc
         run: |
           echo "DESCRIPTION<<EOF" >> $GITHUB_OUTPUT
-          curl -s -H "Authorization: token ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
-            | jq -r '.body' >> $GITHUB_OUTPUT
+          # Используем тело PR из контекста события
+          printf '%s\n' "${{ github.event.pull_request.body }}" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Debug: show PR body preview
+        run: |
+          BODY="${{ github.event.pull_request.body }}"
+          echo "PR body length: ${#BODY}"
+          printf '%s\n' "$BODY" | head -c 200
 
       - name: Parse and update changelog
         env:
