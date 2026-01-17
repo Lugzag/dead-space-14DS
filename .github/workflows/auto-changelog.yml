@@ -19,6 +19,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
+          token: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }}
+          persist-credentials: true
 
       - name: Extract PR description
         id: extract-desc
@@ -79,15 +81,44 @@ jobs:
           BRANCH="auto/changelog-${{ github.event.pull_request.number }}"
           echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
 
+      - name: Prepare auto changelog branch
+        id: prepare_branch
+        run: |
+          set -e
+          BRANCH="auto/changelog-${{ github.event.pull_request.number }}"
+          echo "Branch to use: $BRANCH"
+
+          # Подтягиваем все ветки с origin, чтобы гарантировать наличие origin/<branch>
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+          # Если есть ветка на origin — создаём/обновляем локальную ветку из неё
+          if git rev-parse --verify --quiet refs/remotes/origin/$BRANCH >/dev/null; then
+            echo "Remote branch origin/$BRANCH exists — checking out and resetting to origin/$BRANCH"
+            # если локальной ветки нет — создадим с тем же именем; если есть — перезапишем её
+            if git show-ref --verify --quiet refs/heads/$BRANCH; then
+              git checkout $BRANCH
+              git reset --hard origin/$BRANCH
+            else
+              git checkout -b $BRANCH origin/$BRANCH
+            fi
+          else
+            echo "Remote branch origin/$BRANCH does not exist — creating new local branch $BRANCH from current HEAD"
+            git checkout -b $BRANCH
+          fi
+
+          echo "Prepared local branch:"
+          git branch --show-current
+          git status --porcelain
+          echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
+    
       - name: Commit and push changes to auto branch
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          branch: ${{ steps.branch.outputs.branch_name }}
+          branch: ${{ steps.prepare_branch.outputs.branch_name }}
           commit_message: "Обновлён ченжлог #${{ github.event.pull_request.number }}"
           file_pattern: Resources/Changelog/ChangelogDS14.yml
         env:
-          # используем стандартный токен (доступен в большинстве случаев)
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_KLOOPRE_PUSH_TOKEN }} # или secrets.GITHUB_TOKEN в зависимости от прав
 
       - name: Create PR to master if not exists
         env:
