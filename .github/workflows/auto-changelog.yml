@@ -103,26 +103,30 @@ jobs:
           BRANCH="${{ steps.branch.outputs.branch_name }}"
           echo "Branch to use: $BRANCH"
 
+          # fetch all heads so we can inspect origin/$BRANCH
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
 
-          if git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
-            echo "Remote branch origin/$BRANCH exists — checking out and rebasing on it"
-            # если локальной ветки нет — создаём; если есть — переключаемся
-            if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-              git checkout $BRANCH
-            else
-              git checkout -b $BRANCH origin/$BRANCH
-            fi
-            # синхронизация: rebase на remote, чтобы локально было актуально
-            git fetch origin $BRANCH
-            git rebase --autostash origin/$BRANCH || {
-              echo "Rebase failed, trying merge fallback"
-              git rebase --abort || true
-              git merge --no-edit origin/$BRANCH || true
-            }
+          # If local branch already exists -> checkout it.
+          if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+            echo "Local branch $BRANCH exists — checking out"
+            git checkout $BRANCH
           else
-            echo "Remote branch origin/$BRANCH does not exist — creating new local branch $BRANCH from current HEAD"
-            git checkout -b $BRANCH
+            # If remote branch exists, create local branch that points to HEAD (so uncommitted changes are preserved),
+            # then rebase/merge origin/$BRANCH into it to bring remote changes on top.
+            if git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
+              echo "Remote branch origin/$BRANCH exists — creating local branch from current HEAD to preserve uncommitted changes"
+              git branch -f "$BRANCH" HEAD
+              git checkout "$BRANCH"
+              git fetch origin "$BRANCH"
+              git rebase --autostash "origin/$BRANCH" || {
+                echo "Rebase failed, trying merge fallback"
+                git rebase --abort || true
+                git merge --no-edit "origin/$BRANCH" || true
+              }
+            else
+              echo "Remote branch origin/$BRANCH does not exist — creating new local branch $BRANCH from current HEAD"
+              git checkout -b "$BRANCH"
+            fi
           fi
 
           echo "Prepared local branch: $(git branch --show-current)"
