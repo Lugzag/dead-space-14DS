@@ -138,24 +138,28 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="${{ steps.prepare_branch.outputs.branch_name }}"
-
-          # Установим автора/коммитера (при необходимости поменяйте)
+      
+          # Установим автора/коммитера
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Добавляем изменения (тот же паттерн, что у вас)
-          git add Resources/Changelog/ChangelogDS14.yml
-
+      
+          FILE="Resources/Changelog/ChangelogDS14.yml"
+      
+          # Добавляем изменения
+          git add "$FILE" || true
+      
           # Если нет изменений — выходим
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
-
-          git commit -m "Обновлён ченжлог #${{ github.event.pull_request.number }}"
-
+      
+          git commit -m "Обновлён ченжлог #${{ github.event.pull_request.number }}" || true
+      
           # Попытки пуша (максимум 3 попытки)
           MAX_TRIES=3
+          PUSHED=false
+      
           for i in $(seq 1 $MAX_TRIES); do
             echo "Push attempt $i..."
             if git push origin "HEAD:$BRANCH"; then
@@ -163,25 +167,111 @@ jobs:
               PUSHED=true
               break
             fi
-            echo "Push failed, fetching remote and rebasing, then retry..."
-            git fetch origin $BRANCH || true
-            # если remote branch существует — rebase на него, иначе просто push в следующий итерации создаст branch
-            if git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
-              git rebase --autostash origin/$BRANCH || {
-                echo "Rebase failed, trying merge fallback"
-                git rebase --abort || true
-                git merge --no-edit origin/$BRANCH || true
-              }
-            fi
-            # короткая пауза перед повтором
-            sleep 1
-            PUSHED=false
-          done
-
-          if [ "${PUSHED:-false}" != "true" ]; then
-            echo "Failed to push after $MAX_TRIES attempts" >&2
-            exit 1
-          fi
+      
+            echo "Push failed, will try to fetch remote and auto-merge changelog, then retry..."
+      
+            # Подтянем remote ветку
+            git fetch origin "$BRANCH" || true
+      
+            # Если remote ветка существует, попробуем аккуратно объединить файл changelog
+            if git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH"; then
+              # Получим remote-версию файла (если существует) в /tmp/remote.yml
+              if git ls-tree -r "origin/$BRANCH" --name-only | grep -q "^$FILE$"; then
+                git show "origin/$BRANCH:$FILE" > /tmp/remote.yml || true
+              else
+                echo "{}" > /tmp/remote.yml
+              fi
+      
+              # Получим локальную версию (рабочая копия)
+              if [ -f "$FILE" ]; then
+                cp "$FILE" /tmp/local.yml
+              else
+                echo "{}" > /tmp/local.yml
+              fi
+      
+              # Python-скрипт объединит Entries из remote и локального файлов, удалит дубликаты и пересчитает id
+              python3 - <<'PY'
+              import yaml, hashlib, sys
+              from pathlib import Path
+              remote_path = Path("/tmp/remote.yml")
+              local_path  = Path("/tmp/local.yml")
+              out_path    = Path("Resources/Changelog/ChangelogDS14.yml")
+              
+              def load(p):
+                  try:
+                      return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+                  except Exception:
+                      return {}
+              
+              r = load(remote_path)
+              l = load(local_path)
+              
+              r_entries = r.get("Entries", []) if isinstance(r, dict) else []
+              l_entries = l.get("Entries", []) if isinstance(l, dict) else []
+              
+              def entry_key(e):
+                  # Сформируем ключ по содержимому changes+author+time (строки), чтобы избежать дубликатов
+                  from json import dumps
+                  key = {
+                      "author": e.get("author"),
+                      "time": e.get("time"),
+                      "changes": e.get("changes")
+                  }
+                  return hashlib.sha1(dumps(key, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+              
+              seen = {}
+              merged = []
+              
+              # Сначала remote, затем local (чтобы локальные невошедшие ещё записи оказались после)
+              for ent in (r_entries + l_entries):
+                  k = entry_key(ent)
+                  if k in seen:
+                      continue
+                  seen[k] = True
+                  merged.append(ent)
+              
+              # Пересчитаем id последовательно, начиная с 1, сохраняя порядок (remote затем local)
+              for idx, ent in enumerate(merged, start=1):
+                  ent['id'] = idx
+              
+              out = {"Entries": merged}
+              out_path.parent.mkdir(parents=True, exist_ok=True)
+              out_path.write_text(yaml.dump(out, allow_unicode=True, sort_keys=False, indent=2), encoding="utf-8")
+              print("Merged changelog saved with {} entries".format(len(merged)))
+              PY
+              
+                      # Добавим и закоммитим объединённый файл
+                      git add "$FILE"
+                      if git diff --cached --quiet; then
+                        echo "No staged changes after merge script"
+                      else
+                        git commit -m "Auto-merge changelog from origin/$BRANCH" || true
+                      fi
+              
+                      # Попытаемся запушить снова
+                      if git push origin "HEAD:$BRANCH"; then
+                        echo "Push succeeded after auto-merge"
+                        PUSHED=true
+                        break
+                      else
+                        echo "Push still failed after auto-merge, will retry loop"
+                      fi
+              
+                    else
+                      # remote branch не существует — на следующей итерации push создаст её
+                      echo "Remote branch origin/$BRANCH does not exist — next push will create it"
+                    fi
+              
+                    sleep 1
+                  done
+              
+                  if [ "${PUSHED}" != "true" ]; then
+                    echo "Failed to push after $MAX_TRIES attempts" >&2
+                    # Покажем статус для отладки
+                    git status --porcelain
+                    git log --oneline -n 10 || true
+                    exit 1
+                  fi
 
       - name: Create PR to master if not exists (or reuse existing)
         env:
