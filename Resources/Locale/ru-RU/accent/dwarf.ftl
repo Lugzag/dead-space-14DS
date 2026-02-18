@@ -282,7 +282,6 @@ accent-dwarf-words-replace-146 = обалдуй
 accent-dwarf-words-147 = СБ
 accent-dwarf-words-replace-147 = стража
 accent-dwarf-words-148 = a
-
 accent-dwarf-words-replace-148 = ae
 accent-dwarf-words-149 = яо
 accent-dwarf-words-replace-149 = красныэ
@@ -1616,3 +1615,9 @@ accent-dwarf-words-811 = Юристами
 accent-dwarf-words-replace-811 = покрываламы
 accent-dwarf-words-812 = Юристах
 accent-dwarf-words-replace-812 = покрывалах
+accent-dwarf-words-813 = бриг
+accent-dwarf-words-replace-813 = казармы
+accent-dwarf-words-814 = бригу
+accent-dwarf-words-replace-813 = казармам
+accent-dwarf-words-815 = брига
+accent-dwarf-words-replace-813 = казарм
